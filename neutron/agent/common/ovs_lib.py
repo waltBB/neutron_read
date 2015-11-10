@@ -31,13 +31,16 @@ from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.common import constants
 
 # Default timeout for ovs-vsctl command
+# 默认ovs-vsctl命令退出时间为10秒
 DEFAULT_OVS_VSCTL_TIMEOUT = 10
 
-# Special return value for an invalid OVS ofport
+# Special return value for an invalid OVS ofport (ofport = OpenFlowPort)
+# 为无效 OVS OpenFlow端口指定返回一个值
 INVALID_OFPORT = -1
 UNASSIGNED_OFPORT = []
 
 # OVS bridge fail modes
+# OVS桥失败模式
 FAILMODE_SECURE = 'secure'
 
 OPTS = [
@@ -53,6 +56,7 @@ LOG = logging.getLogger(__name__)
 def _ofport_result_pending(result):
     """Return True if ovs-vsctl indicates the result is still pending."""
     # ovs-vsctl can return '[]' for an ofport that has not yet been assigned
+    # ovs-vsctl 可以为一个尚未分配的ofport返回 '[]'
     try:
         int(result)
         return False
@@ -80,6 +84,7 @@ def _ofport_retry(fn):
 
 
 class VifPort(object):
+    # 端口，OpenFlow端口号，vif=（VM Interface）虚拟机接口ID，虚拟机Mac地址，交换机
     def __init__(self, port_name, ofport, vif_id, vif_mac, switch):
         self.port_name = port_name
         self.ofport = ofport
@@ -93,17 +98,18 @@ class VifPort(object):
                 ", ofport=" + str(self.ofport) + ", bridge_name=" +
                 self.switch.br_name)
 
-
+# 对OpenVSwitch进行增删改查操作
 class BaseOVS(object):
 
     def __init__(self):
         self.vsctl_timeout = cfg.CONF.ovs_vsctl_timeout
         self.ovsdb = ovsdb.API.get(self)
-
+    
     def add_bridge(self, bridge_name):
         self.ovsdb.add_br(bridge_name).execute()
         br = OVSBridge(bridge_name)
         # Don't return until vswitchd sets up the internal port
+        # 不会返回，直到 vswitchd 配置了内部端口号
         br.get_port_ofport(bridge_name)
         return br
 
@@ -113,6 +119,7 @@ class BaseOVS(object):
     def bridge_exists(self, bridge_name):
         return self.ovsdb.br_exists(bridge_name).execute()
 
+    # 判断端口号是否存在
     def port_exists(self, port_name):
         cmd = self.ovsdb.db_get('Port', port_name, 'name')
         return bool(cmd.execute(check_error=False, log_errors=False))
@@ -125,7 +132,8 @@ class BaseOVS(object):
 
     def get_bridge_external_bridge_id(self, bridge):
         return self.ovsdb.br_get_external_id(bridge, 'bridge-id').execute()
-
+    
+    # 设置数据库表属性(表名，记录，列，值，是否进行错误检查)
     def set_db_attribute(self, table_name, record, column, value,
                          check_error=False):
         self.ovsdb.db_set(table_name, record, (column, value)).execute(
@@ -133,13 +141,16 @@ class BaseOVS(object):
 
     def clear_db_attribute(self, table_name, record, column):
         self.ovsdb.db_clear(table_name, record, column).execute()
-
+    
+    # 获得数据库表属性
     def db_get_val(self, table, record, column, check_error=False):
         return self.ovsdb.db_get(table, record, column).execute(
             check_error=check_error)
 
 
 class OVSBridge(BaseOVS):
+    
+    # 桥接名称
     def __init__(self, br_name):
         super(OVSBridge, self).__init__()
         self.br_name = br_name
@@ -154,7 +165,8 @@ class OVSBridge(BaseOVS):
     def get_controller(self):
         return self.ovsdb.get_controller(self.br_name).execute(
             check_error=True)
-
+    
+    # 设置安全模式
     def set_secure_mode(self):
         self.ovsdb.set_fail_mode(self.br_name, FAILMODE_SECURE).execute(
             check_error=True)
@@ -166,19 +178,23 @@ class OVSBridge(BaseOVS):
     def create(self):
         self.ovsdb.add_br(self.br_name).execute()
         # Don't return until vswitchd sets up the internal port
+        # 不会返回，直到 vswitchd 设置了内部端口号
         self.get_port_ofport(self.br_name)
 
     def destroy(self):
         self.delete_bridge(self.br_name)
-
+    
+    # 重新设置网桥，先删除网桥再创建网桥
     def reset_bridge(self, secure_mode=False):
         with self.ovsdb.transaction() as txn:
             txn.add(self.ovsdb.del_br(self.br_name))
             txn.add(self.ovsdb.add_br(self.br_name))
+            # 如果有安全模式，则添加安全模式
             if secure_mode:
                 txn.add(self.ovsdb.set_fail_mode(self.br_name,
                                                  FAILMODE_SECURE))
-
+    
+    # 添加端口号依据(网桥名称，端口号名称，接口属性元组)
     def add_port(self, port_name, *interface_attr_tuples):
         with self.ovsdb.transaction() as txn:
             txn.add(self.ovsdb.add_port(self.br_name, port_name))
@@ -186,7 +202,8 @@ class OVSBridge(BaseOVS):
                 txn.add(self.ovsdb.db_set('Interface', port_name,
                                           *interface_attr_tuples))
         return self.get_port_ofport(port_name)
-
+    
+    # 替换端口号依据(网桥名称，端口号名称，接口熟悉元组)
     def replace_port(self, port_name, *interface_attr_tuples):
         """Replace existing port or create it, and configure port interface."""
         with self.ovsdb.transaction() as txn:
@@ -197,6 +214,7 @@ class OVSBridge(BaseOVS):
                 txn.add(self.ovsdb.db_set('Interface', port_name,
                                           *interface_attr_tuples))
         # Don't return until the port has been assigned by vswitchd
+        # 不会返回，直到端口号被vswitchd分配
         self.get_port_ofport(port_name)
 
     def delete_port(self, port_name):

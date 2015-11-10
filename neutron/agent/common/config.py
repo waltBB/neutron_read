@@ -35,6 +35,8 @@ ROOT_HELPER_OPTS = [
     # it isn't appropriate for long-lived processes spawned with create_process
     # Having a bool use_rootwrap_daemon option precludes specifying the
     # rootwrap daemon command, which may be necessary for Xen?
+    # 我们不能只使用 root_helper=sudo neutron-rootwrap-daemon $cfg，因为它不适合长期处理create_process
+    # 孵化，拥有一个bool use_rootwrap_daemon选项指定rootwrap守护进程命令中排除,这对Xen可能是必要的?
     cfg.StrOpt('root_helper_daemon',
                help=_('Root helper daemon application to use when possible.')),
 ]
@@ -83,6 +85,7 @@ def get_log_args(conf, log_file_name, **kwargs):
         cmd_args.append('--log-file=%s' % log_file_name)
         log_dir = None
         if conf.log_dir and conf.log_file:
+            # 日志完整目录路径有配置文件路径和配置文件名称共同组成
             log_dir = os.path.dirname(
                 os.path.join(conf.log_dir, conf.log_file))
         elif conf.log_dir:
@@ -142,4 +145,5 @@ def setup_conf():
     return conf
 
 # add a logging setup method here for convenience
+# 为了方便起见，添加一个日志设置方法
 setup_logging = config.setup_logging
